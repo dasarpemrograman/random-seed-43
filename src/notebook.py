@@ -748,5 +748,65 @@ def _(
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Exp 6 – Initializer Comparison
+
+    Architecture: `input → 64 (relu) → 64 (relu) → output (sigmoid)`
+    Fixed: `lr=0.01`, `epochs=100`, `batch_size=32`
+
+    | Config | Initializer |
+    |--------|-------------|
+    | A | Uniform |
+    | B | Xavier |
+    | C | He |
+    """)
+    return
+
+
+@app.cell
+def _(
+    X_test_final,
+    build_and_train,
+    eval_model,
+    pd,
+    plot_loss_curves,
+    y_test_final,
+):
+    _configs_6 = {
+        "A: Uniform": "uniform",
+        "B: Xavier": "xavier",
+        "C: He": "he",
+    }
+
+    _histories_6, _rows_6 = [], []
+
+    for _lbl, _init in _configs_6.items():
+        _model, _hist = build_and_train(
+            [64, 64],
+            ["relu", "relu"],
+            lr=0.01,
+            epochs=100,
+            batch_size=32,
+            initializer=_init,
+        )
+        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _histories_6.append(_hist)
+        _rows_6.append({"Config": _lbl, **_metrics})
+
+    plot_loss_curves(
+        _histories_6,
+        list(_configs_6.keys()),
+        "Exp 6: Initializer Comparison – Train / Val Loss",
+    )
+
+    _df_6 = pd.DataFrame(_rows_6).set_index("Config")
+    print("\nExp 6 – Final Metrics")
+    print(_df_6.to_string())
+    _df_6
+    return
+
+
 if __name__ == "__main__":
     app.run()
