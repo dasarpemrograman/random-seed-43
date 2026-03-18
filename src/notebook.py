@@ -123,7 +123,7 @@ def _(df_encoded, np):
 
 @app.cell
 def _(X, train_test_split, y):
-    X_train_full, X_test, y_train_full, y_test = train_test_split(
+    X_train_full, X_val, y_train_full, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
 
@@ -133,8 +133,8 @@ def _(X, train_test_split, y):
 
     print(f"  X_train : {X_train.shape}  y_train : {y_train.shape}")
     print(f"  X_val   : {X_val.shape}  y_val   : {y_val.shape}")
-    print(f"  X_test  : {X_test.shape}  y_test  : {y_test.shape}")
-    return X_test, X_train, X_val, y_test, y_train, y_val
+    print(f"  X_val  : {X_val.shape}  y_val  : {y_val.shape}")
+    return X_train, X_val, y_train, y_val
 
 
 @app.cell
@@ -153,13 +153,11 @@ def _(X_train, y_train):
 @app.cell
 def _(
     StandardScaler,
-    X_test,
     X_train_sm,
     X_val,
     feature_cols,
     np,
     num_cols,
-    y_test,
     y_train_sm,
     y_val,
 ):
@@ -169,31 +167,24 @@ def _(
 
     X_train_final = X_train_sm.copy()
     X_val_final = X_val.copy()
-    X_test_final = X_test.copy()
+    X_val_final = X_val.copy()
 
     X_train_final[:, idx_num] = scaler.fit_transform(X_train_sm[:, idx_num])
     X_val_final[:, idx_num] = scaler.transform(X_val[:, idx_num])
-    X_test_final[:, idx_num] = scaler.transform(X_test[:, idx_num])
+    X_val_final[:, idx_num] = scaler.transform(X_val[:, idx_num])
 
     X_train_final = X_train_final.astype(np.float64)
     X_val_final = X_val_final.astype(np.float64)
-    X_test_final = X_test_final.astype(np.float64)
+    X_val_final = X_val_final.astype(np.float64)
 
     y_train_final = y_train_sm.astype(np.float64)
     y_val_final = y_val.astype(np.float64)
-    y_test_final = y_test.astype(np.float64)
+    y_val_final = y_val.astype(np.float64)
 
     print(f"  X_train : {X_train_final.shape}  y_train : {y_train_final.shape}")
     print(f"  X_val   : {X_val_final.shape}  y_val   : {y_val_final.shape}")
-    print(f"  X_test  : {X_test_final.shape}  y_test  : {y_test_final.shape}")
-    return (
-        X_test_final,
-        X_train_final,
-        X_val_final,
-        y_test_final,
-        y_train_final,
-        y_val_final,
-    )
+    print(f"  X_val  : {X_val_final.shape}  y_val  : {y_val_final.shape}")
+    return X_train_final, X_val_final, y_train_final, y_val_final
 
 
 @app.cell(hide_code=True)
@@ -351,12 +342,12 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
+    X_val_final,
     build_and_train,
     eval_model,
     pd,
     plot_loss_curves,
-    y_test_final,
+    y_val_final,
 ):
     _configs_1a = {
         "A: [16, 16]": [16, 16],
@@ -374,7 +365,7 @@ def _(
             epochs=100,
             batch_size=32,
         )
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model(_model, X_val_final, y_val_final)
         _histories_1a.append(_hist)
         _rows_1a.append({"Config": _lbl, **_metrics})
 
@@ -409,12 +400,12 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
+    X_val_final,
     build_and_train,
     eval_model,
     pd,
     plot_loss_curves,
-    y_test_final,
+    y_val_final,
 ):
     _configs_1b = {
         "A: [64]": [64],
@@ -432,7 +423,7 @@ def _(
             epochs=100,
             batch_size=32,
         )
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model(_model, X_val_final, y_val_final)
         _histories_1b.append(_hist)
         _rows_1b.append({"Config": _lbl, **_metrics})
 
@@ -469,16 +460,16 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
+    X_val_final,
     build_and_train,
     eval_model,
     pd,
     plot_loss_curves,
     plot_wgrad_dists,
     refresh_gradients,
-    y_test_final,
     y_train_final,
+    y_val_final,
 ):
     _TEST_LAYER_IDX = 1
     _test_acts = ["linear", "relu", "sigmoid", "tanh"]
@@ -494,7 +485,7 @@ def _(
             batch_size=32,
         )
         refresh_gradients(_model, X_train_final, y_train_final)
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model(_model, X_val_final, y_val_final)
         _histories_2.append(_hist)
         _models_2.append(_model)
         _labels_2.append(f"Test: {_act}")
@@ -542,16 +533,16 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
+    X_val_final,
     build_and_train,
     eval_model,
     pd,
     plot_loss_curves,
     plot_wgrad_dists,
     refresh_gradients,
-    y_test_final,
     y_train_final,
+    y_val_final,
 ):
     _VIS_LAYER_IDX_3 = 1
     _lrs = {"LR A: 0.001": 0.001, "LR B: 0.01": 0.01, "LR C: 0.1": 0.1}
@@ -567,7 +558,7 @@ def _(
             batch_size=32,
         )
         refresh_gradients(_model, X_train_final, y_train_final)
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model(_model, X_val_final, y_val_final)
         _histories_3.append(_hist)
         _models_3.append(_model)
         _labels_3.append(_lbl)
@@ -616,16 +607,16 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
+    X_val_final,
     build_and_train,
     eval_model,
     pd,
     plot_loss_curves,
     plot_wgrad_dists,
     refresh_gradients,
-    y_test_final,
     y_train_final,
+    y_val_final,
 ):
     _VIS_LAYER_IDX_4 = 1
     _reg_configs = {
@@ -647,7 +638,7 @@ def _(
             reg_kwargs=_cfg["reg_kwargs"],
         )
         refresh_gradients(_model, X_train_final, y_train_final)
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model(_model, X_val_final, y_val_final)
         _histories_4.append(_hist)
         _models_4.append(_model)
         _labels_4.append(_lbl)
@@ -691,8 +682,8 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
+    X_val_final,
     accuracy_score,
     build_and_train,
     eval_model,
@@ -700,8 +691,8 @@ def _(
     pd,
     precision_score,
     recall_score,
-    y_test_final,
     y_train_final,
+    y_val_final,
 ):
     from sklearn.neural_network import MLPClassifier
 
@@ -712,7 +703,7 @@ def _(
         epochs=100,
         batch_size=32,
     )
-    _scratch_metrics = eval_model(_scratch, X_test_final, y_test_final)
+    _scratch_metrics = eval_model(_scratch, X_val_final, y_val_final)
 
     _sk = MLPClassifier(
         hidden_layer_sizes=(64, 64),
@@ -725,8 +716,8 @@ def _(
         random_state=42,
     )
     _sk.fit(X_train_final, y_train_final.ravel())
-    _sk_pred = _sk.predict(X_test_final)
-    _y_true = y_test_final.flatten().astype(int)
+    _sk_pred = _sk.predict(X_val_final)
+    _y_true = y_val_final.flatten().astype(int)
     _kw = dict(average="weighted", zero_division=0)
     _sk_metrics = {
         "Accuracy": round(accuracy_score(_y_true, _sk_pred), 4),
@@ -767,12 +758,12 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
+    X_val_final,
     build_and_train,
     eval_model,
     pd,
     plot_loss_curves,
-    y_test_final,
+    y_val_final,
 ):
     _configs_6 = {
         "A: Uniform": "uniform",
@@ -791,7 +782,7 @@ def _(
             batch_size=32,
             initializer=_init,
         )
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model(_model, X_val_final, y_val_final)
         _histories_6.append(_hist)
         _rows_6.append({"Config": _lbl, **_metrics})
 
