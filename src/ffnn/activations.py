@@ -6,7 +6,7 @@ class Linear:
         self.input = x
         return x
 
-    def backward(self, delta):
+    def backward(self):
         return np.ones_like(self.input)
 
 
@@ -15,7 +15,7 @@ class ReLu:
         self.input = x
         return np.maximum(0, x)
 
-    def backward(self, delta):
+    def backward(self):
         return (self.input > 0).astype(float)
 
 
@@ -24,7 +24,7 @@ class Sigmoid:
         self.out = 1 / (1 + np.exp(-x))
         return self.out
 
-    def backward(self, delta):
+    def backward(self):
         return self.out * (1 - self.out)
 
 
@@ -33,7 +33,7 @@ class Tanh:
         self.out = np.tanh(x)
         return self.out
 
-    def backward(self, delta):
+    def backward(self):
         return 1 - self.out**2
 
 
@@ -43,7 +43,7 @@ class Softmax:
         self.out = exp / np.sum(exp, axis=-1, keepdims=True)
         return self.out
 
-    def backward(self, delta):
+    def backward(self):
         batch_size, n = self.out.shape
         J = np.zeros((batch_size, n, n))
         for i, out_i in enumerate(self.out):
