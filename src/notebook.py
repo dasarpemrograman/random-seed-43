@@ -127,25 +127,20 @@ def _(X, train_test_split, y):
         X, y, test_size=0.2, random_state=42
     )
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_full, y_train_full, test_size=0.2, random_state=42
-    )
-
-    print(f"  X_train : {X_train.shape}  y_train : {y_train.shape}")
-    print(f"  X_val   : {X_val.shape}  y_val   : {y_val.shape}")
+    print(f"  X_train : {X_train_full.shape}  y_train : {y_train_full.shape}")
     print(f"  X_test  : {X_test.shape}  y_test  : {y_test.shape}")
-    return X_test, X_train, X_val, y_test, y_train, y_val
+    return X_test, X_train_full, y_test, y_train_full
 
 
 @app.cell
-def _(X_train, y_train):
+def _(X_train_full, y_train_full):
     from imblearn.over_sampling import SMOTE
 
     sm = SMOTE(random_state=42)
-    X_train_sm, y_train_sm = sm.fit_resample(X_train, y_train.ravel())
+    X_train_sm, y_train_sm = sm.fit_resample(X_train_full, y_train_full.ravel())
     y_train_sm = y_train_sm.reshape(-1, 1)
 
-    print(f"  Before SMOTE : {X_train.shape}  {y_train.shape}")
+    print(f"  Before SMOTE : {X_train_full.shape}  {y_train_full.shape}")
     print(f"  After  SMOTE : {X_train_sm.shape}  {y_train_sm.shape}")
     return X_train_sm, y_train_sm
 
@@ -155,44 +150,37 @@ def _(
     StandardScaler,
     X_test,
     X_train_sm,
-    X_val,
     feature_cols,
     np,
     num_cols,
     y_test,
     y_train_sm,
-    y_val,
 ):
     idx_num = [i for i, col in enumerate(feature_cols) if col in num_cols]
 
     scaler = StandardScaler()
 
     X_train_final = X_train_sm.copy()
-    X_val_final = X_val.copy()
     X_test_final = X_test.copy()
 
     X_train_final[:, idx_num] = scaler.fit_transform(X_train_sm[:, idx_num])
-    X_val_final[:, idx_num] = scaler.transform(X_val[:, idx_num])
     X_test_final[:, idx_num] = scaler.transform(X_test[:, idx_num])
 
     X_train_final = X_train_final.astype(np.float64)
-    X_val_final = X_val_final.astype(np.float64)
     X_test_final = X_test_final.astype(np.float64)
 
     y_train_final = y_train_sm.astype(np.float64)
-    y_val_final = y_val.astype(np.float64)
     y_test_final = y_test.astype(np.float64)
 
     print(f"  X_train : {X_train_final.shape}  y_train : {y_train_final.shape}")
-    print(f"  X_val   : {X_val_final.shape}  y_val   : {y_val_final.shape}")
     print(f"  X_test  : {X_test_final.shape}  y_test  : {y_test_final.shape}")
     return (
         X_test_final,
         X_train_final,
-        X_val_final,
+        idx_num,
+        scaler,
         y_test_final,
         y_train_final,
-        y_val_final,
     )
 
 
@@ -212,7 +200,7 @@ def _():
 
 
 @app.cell
-def _(FFNN, X_train_final, X_val_final, y_train_final, y_val_final):
+def _(FFNN, X_train_final, y_train_final):
     import matplotlib.pyplot as plt
     from sklearn.metrics import (
         accuracy_score,
@@ -220,6 +208,9 @@ def _(FFNN, X_train_final, X_val_final, y_train_final, y_val_final):
         precision_score,
         recall_score,
     )
+    from sklearn.model_selection import StratifiedKFold
+
+    N_SPLITS = 5
 
     def build_and_train(
         hidden_sizes,
@@ -232,28 +223,49 @@ def _(FFNN, X_train_final, X_val_final, y_train_final, y_val_final):
         regularizer="none",
         reg_kwargs=None,
     ):
-        n_in = X_train_final.shape[1]
-        layer_sizes = [n_in] + list(hidden_sizes) + [1]
-        activations = list(activations_hidden) + ["sigmoid"]
+        """Train with Stratified K-Fold CV; return (last_fold_model, avg_history)."""
+        skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
+        y_labels = y_train_final.ravel().astype(int)
 
-        model = FFNN(
-            layer_sizes=layer_sizes,
-            activations=activations,
-            loss="bce",
-            initializer=initializer,
-            regularizer=regularizer,
-            reg_kwargs=reg_kwargs or {},
-        )
-        history = model.fit(
-            X_train_final,
-            y_train_final,
-            batch_size=batch_size,
-            learning_rate=lr,
-            epochs=epochs,
-            verbose=0,
-            validation_data=(X_val_final, y_val_final),
-        )
-        return model, history
+        fold_train_losses = []
+        fold_val_losses = []
+        last_model = None
+
+        for train_idx, val_idx in skf.split(X_train_final, y_labels):
+            X_fold_tr, X_fold_val = X_train_final[train_idx], X_train_final[val_idx]
+            y_fold_tr, y_fold_val = y_train_final[train_idx], y_train_final[val_idx]
+
+            n_in = X_fold_tr.shape[1]
+            layer_sizes = [n_in] + list(hidden_sizes) + [1]
+            activations = list(activations_hidden) + ["sigmoid"]
+
+            model = FFNN(
+                layer_sizes=layer_sizes,
+                activations=activations,
+                loss="bce",
+                initializer=initializer,
+                regularizer=regularizer,
+                reg_kwargs=reg_kwargs or {},
+            )
+            history = model.fit(
+                X_fold_tr,
+                y_fold_tr,
+                batch_size=batch_size,
+                learning_rate=lr,
+                epochs=epochs,
+                verbose=0,
+                validation_data=(X_fold_val, y_fold_val),
+            )
+            fold_train_losses.append(history["train_loss"])
+            fold_val_losses.append(history["val_loss"])
+            last_model = model
+
+        import numpy as _np
+        avg_history = {
+            "train_loss": list(_np.mean(fold_train_losses, axis=0)),
+            "val_loss": list(_np.mean(fold_val_losses, axis=0)),
+        }
+        return last_model, avg_history
 
     def eval_model(model, X, y_true):
         y_pred = model.predict(X)
@@ -265,6 +277,70 @@ def _(FFNN, X_train_final, X_val_final, y_train_final, y_val_final):
             "Precision": round(precision_score(y_flat, y_pred, **kw), 4),
             "Recall": round(recall_score(y_flat, y_pred, **kw), 4),
         }
+
+    def eval_model_cv(
+        hidden_sizes,
+        activations_hidden,
+        *,
+        lr=0.01,
+        epochs=100,
+        batch_size=32,
+        initializer="uniform",
+        regularizer="none",
+        reg_kwargs=None,
+    ):
+        """Return averaged metrics across Stratified K-Fold CV folds."""
+        import numpy as _np
+        from sklearn.metrics import (
+            accuracy_score as _acc,
+            f1_score as _f1,
+            precision_score as _prec,
+            recall_score as _rec,
+        )
+
+        skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
+        y_labels = y_train_final.ravel().astype(int)
+
+        fold_metrics = []
+        for train_idx, val_idx in skf.split(X_train_final, y_labels):
+            X_fold_tr, X_fold_val = X_train_final[train_idx], X_train_final[val_idx]
+            y_fold_tr, y_fold_val = y_train_final[train_idx], y_train_final[val_idx]
+
+            n_in = X_fold_tr.shape[1]
+            layer_sizes = [n_in] + list(hidden_sizes) + [1]
+            activations = list(activations_hidden) + ["sigmoid"]
+
+            model = FFNN(
+                layer_sizes=layer_sizes,
+                activations=activations,
+                loss="bce",
+                initializer=initializer,
+                regularizer=regularizer,
+                reg_kwargs=reg_kwargs or {},
+            )
+            model.fit(
+                X_fold_tr,
+                y_fold_tr,
+                batch_size=batch_size,
+                learning_rate=lr,
+                epochs=epochs,
+                verbose=0,
+            )
+            y_pred = model.predict(X_fold_val)
+            y_flat = y_fold_val.flatten().astype(int)
+            kw = dict(average="weighted", zero_division=0)
+            fold_metrics.append({
+                "Accuracy": _acc(y_flat, y_pred),
+                "F1": _f1(y_flat, y_pred, **kw),
+                "Precision": _prec(y_flat, y_pred, **kw),
+                "Recall": _rec(y_flat, y_pred, **kw),
+            })
+
+        avg = {
+            k: round(float(_np.mean([m[k] for m in fold_metrics])), 4)
+            for k in fold_metrics[0]
+        }
+        return avg
 
     def refresh_gradients(model, X, y):
         y_pred = model.forward(X)
@@ -281,7 +357,7 @@ def _(FFNN, X_train_final, X_val_final, y_train_final, y_val_final):
             if hist["val_loss"]:
                 ax_val.plot(hist["val_loss"], label=lbl, color=c)
 
-        for ax, name in zip((ax_tr, ax_val), ("Train Loss", "Val Loss")):
+        for ax, name in zip((ax_tr, ax_val), ("Train Loss (avg CV)", "Val Loss (avg CV)")):
             ax.set_title(name)
             ax.set_xlabel("Epoch")
             ax.set_ylabel("Loss")
@@ -324,6 +400,7 @@ def _(FFNN, X_train_final, X_val_final, y_train_final, y_val_final):
         accuracy_score,
         build_and_train,
         eval_model,
+        eval_model_cv,
         f1_score,
         plot_loss_curves,
         plot_wgrad_dists,
@@ -351,12 +428,10 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     build_and_train,
-    eval_model,
+    eval_model_cv,
     pd,
     plot_loss_curves,
-    y_test_final,
 ):
     _configs_1a = {
         "A: [16, 16]": [16, 16],
@@ -374,7 +449,13 @@ def _(
             epochs=100,
             batch_size=32,
         )
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model_cv(
+            _hidden,
+            ["relu"] * len(_hidden),
+            lr=0.01,
+            epochs=100,
+            batch_size=32,
+        )
         _histories_1a.append(_hist)
         _rows_1a.append({"Config": _lbl, **_metrics})
 
@@ -409,12 +490,10 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     build_and_train,
-    eval_model,
+    eval_model_cv,
     pd,
     plot_loss_curves,
-    y_test_final,
 ):
     _configs_1b = {
         "A: [64]": [64],
@@ -432,7 +511,13 @@ def _(
             epochs=100,
             batch_size=32,
         )
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model_cv(
+            _hidden,
+            ["relu"] * len(_hidden),
+            lr=0.01,
+            epochs=100,
+            batch_size=32,
+        )
         _histories_1b.append(_hist)
         _rows_1b.append({"Config": _lbl, **_metrics})
 
@@ -469,15 +554,13 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
     build_and_train,
-    eval_model,
+    eval_model_cv,
     pd,
     plot_loss_curves,
     plot_wgrad_dists,
     refresh_gradients,
-    y_test_final,
     y_train_final,
 ):
     _TEST_LAYER_IDX = 1
@@ -494,7 +577,13 @@ def _(
             batch_size=32,
         )
         refresh_gradients(_model, X_train_final, y_train_final)
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model_cv(
+            [64, 64, 64],
+            ["relu", _act, "relu"],
+            lr=0.01,
+            epochs=100,
+            batch_size=32,
+        )
         _histories_2.append(_hist)
         _models_2.append(_model)
         _labels_2.append(f"Test: {_act}")
@@ -542,15 +631,13 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
     build_and_train,
-    eval_model,
+    eval_model_cv,
     pd,
     plot_loss_curves,
     plot_wgrad_dists,
     refresh_gradients,
-    y_test_final,
     y_train_final,
 ):
     _VIS_LAYER_IDX_3 = 1
@@ -567,7 +654,13 @@ def _(
             batch_size=32,
         )
         refresh_gradients(_model, X_train_final, y_train_final)
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model_cv(
+            [64, 64],
+            ["relu", "relu"],
+            lr=_lr,
+            epochs=100,
+            batch_size=32,
+        )
         _histories_3.append(_hist)
         _models_3.append(_model)
         _labels_3.append(_lbl)
@@ -616,15 +709,13 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
     build_and_train,
-    eval_model,
+    eval_model_cv,
     pd,
     plot_loss_curves,
     plot_wgrad_dists,
     refresh_gradients,
-    y_test_final,
     y_train_final,
 ):
     _VIS_LAYER_IDX_4 = 1
@@ -647,7 +738,15 @@ def _(
             reg_kwargs=_cfg["reg_kwargs"],
         )
         refresh_gradients(_model, X_train_final, y_train_final)
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model_cv(
+            [64, 64],
+            ["relu", "relu"],
+            lr=0.01,
+            epochs=100,
+            batch_size=32,
+            regularizer=_cfg["regularizer"],
+            reg_kwargs=_cfg["reg_kwargs"],
+        )
         _histories_4.append(_hist)
         _models_4.append(_model)
         _labels_4.append(_lbl)
@@ -691,48 +790,57 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     X_train_final,
     accuracy_score,
-    build_and_train,
-    eval_model,
+    eval_model_cv,
     f1_score,
     pd,
     precision_score,
     recall_score,
-    y_test_final,
     y_train_final,
 ):
+    from sklearn.model_selection import StratifiedKFold as _SKF
     from sklearn.neural_network import MLPClassifier
+    import numpy as _np5
 
-    _scratch, _our_hist = build_and_train(
+    _scratch_metrics = eval_model_cv(
         [64, 64],
         ["relu", "relu"],
         lr=0.01,
         epochs=100,
         batch_size=32,
     )
-    _scratch_metrics = eval_model(_scratch, X_test_final, y_test_final)
 
-    _sk = MLPClassifier(
-        hidden_layer_sizes=(64, 64),
-        activation="relu",
-        solver="sgd",
-        learning_rate="constant",
-        learning_rate_init=0.01,
-        max_iter=100,
-        batch_size=32,
-        random_state=42,
-    )
-    _sk.fit(X_train_final, y_train_final.ravel())
-    _sk_pred = _sk.predict(X_test_final)
-    _y_true = y_test_final.flatten().astype(int)
-    _kw = dict(average="weighted", zero_division=0)
+    # sklearn CV
+    _skf5 = _SKF(n_splits=5, shuffle=True, random_state=42)
+    _y_labels5 = y_train_final.ravel().astype(int)
+    _sk_fold_metrics = []
+    for _tr_idx, _val_idx in _skf5.split(X_train_final, _y_labels5):
+        _X_tr, _X_val = X_train_final[_tr_idx], X_train_final[_val_idx]
+        _y_tr, _y_val = _y_labels5[_tr_idx], _y_labels5[_val_idx]
+        _sk = MLPClassifier(
+            hidden_layer_sizes=(64, 64),
+            activation="relu",
+            solver="sgd",
+            learning_rate="constant",
+            learning_rate_init=0.01,
+            max_iter=100,
+            batch_size=32,
+            random_state=42,
+        )
+        _sk.fit(_X_tr, _y_tr)
+        _sk_pred = _sk.predict(_X_val)
+        _kw = dict(average="weighted", zero_division=0)
+        _sk_fold_metrics.append({
+            "Accuracy": accuracy_score(_y_val, _sk_pred),
+            "F1": f1_score(_y_val, _sk_pred, **_kw),
+            "Precision": precision_score(_y_val, _sk_pred, **_kw),
+            "Recall": recall_score(_y_val, _sk_pred, **_kw),
+        })
+
     _sk_metrics = {
-        "Accuracy": round(accuracy_score(_y_true, _sk_pred), 4),
-        "F1": round(f1_score(_y_true, _sk_pred, **_kw), 4),
-        "Precision": round(precision_score(_y_true, _sk_pred, **_kw), 4),
-        "Recall": round(recall_score(_y_true, _sk_pred, **_kw), 4),
+        k: round(float(_np5.mean([m[k] for m in _sk_fold_metrics])), 4)
+        for k in _sk_fold_metrics[0]
     }
 
     _df_5 = pd.DataFrame(
@@ -767,12 +875,10 @@ def _(mo):
 
 @app.cell
 def _(
-    X_test_final,
     build_and_train,
-    eval_model,
+    eval_model_cv,
     pd,
     plot_loss_curves,
-    y_test_final,
 ):
     _configs_6 = {
         "A: Uniform": "uniform",
@@ -791,7 +897,14 @@ def _(
             batch_size=32,
             initializer=_init,
         )
-        _metrics = eval_model(_model, X_test_final, y_test_final)
+        _metrics = eval_model_cv(
+            [64, 64],
+            ["relu", "relu"],
+            lr=0.01,
+            epochs=100,
+            batch_size=32,
+            initializer=_init,
+        )
         _histories_6.append(_hist)
         _rows_6.append({"Config": _lbl, **_metrics})
 
